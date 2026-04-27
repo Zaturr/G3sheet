@@ -1,0 +1,14 @@
+<svg width="800" height="150" viewBox="0 0 800 150" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="150" fill="white"/>
+  <rect y="145" width="800" height="5" fill="#1A237E"/>
+  <rect y="145" width="200" height="5" fill="#4CAF50"/>
+  <text x="40" y="60" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#1A237E">GENESIS QUINTERO</text>
+  <text x="40" y="90" font-family="Arial, sans-serif" font-size="18" font-style="italic" fill="#666">Contadora Publica</text>
+  <g transform="translate(450, 50)">
+    <path d="M5 0C2.23858 0 0 2.23858 0 5V15C0 17.7614 2.23858 20 5 20H10C12.7614 20 15 17.7614 15 15V5C15 2.23858 12.7614 0 10 0H5Z" fill="#1A237E" opacity="0.1"/>
+    <text x="25" y="15" font-family="Arial, sans-serif" font-size="14" fill="#333">04242564570</text>
+    <text x="25" y="40" font-family="Arial, sans-serif" font-size="14" fill="#333">genesisdaniqg@gmail.com</text>
+  </g>
+  <circle cx="720" cy="75" r="40" stroke="#1A237E" stroke-width="2" fill="none" opacity="0.2"/>
+  <text x="700" y="85" font-family="Georgia, serif" font-size="30" font-weight="bold" fill="#1A237E">GQ</text>
+</svg>

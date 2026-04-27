@@ -16,6 +16,7 @@ const (
 	replyAnniversary   = "te amo mi amorcito"
 	cmdReporteDiario   = "/reporte_diario"
 	cmdReporteSemanal  = "/reporte_semanal"
+	cmdPDF             = "/pdf"
 	cmdPendiente       = "/pendiente"
 	msgSheetsNoConfig  = "Sheets no configurado: revisá SPREADSHEET_ID y GOOGLE_CREDENTIALS_JSON (o GOOGLE_APPLICATION_CREDENTIALS) en .env."
 	msgReporteVacioTpl = "(Vacío) No hubo líneas con texto en columna A de «%s»."
@@ -101,6 +102,8 @@ func RunUpdatesLoop(ctx context.Context, c *Client, sh *SheetsReader) error {
 				handleReporteDiario(ctx, c, sh, chat)
 			case cmdReporteSemanal:
 				handleReporteSemanal(ctx, c, sh, chat)
+			case cmdPDF:
+				handlePDF(ctx, c, sh, chat)
 			case cmdPendiente:
 				handlePendiente(ctx, c, sh, chat)
 			default:
@@ -159,6 +162,21 @@ func handlePendiente(ctx context.Context, c *Client, sh *SheetsReader, chat stri
 		return
 	}
 	_ = c.SendMessageChunksTo(ctx, chat, txt)
+}
+
+func handlePDF(ctx context.Context, c *Client, sh *SheetsReader, chat string) {
+	if sh == nil {
+		_ = c.SendMessageTo(ctx, chat, msgSheetsNoConfig)
+		return
+	}
+	fileBytes, fileName, err := BuildReportesPDF(ctx, sh)
+	if err != nil {
+		_ = c.SendMessageTo(ctx, chat, "Error generando PDF: "+err.Error())
+		return
+	}
+	if err := c.SendDocumentTo(ctx, chat, fileName, fileBytes); err != nil {
+		_ = c.SendMessageTo(ctx, chat, "Error enviando PDF: "+err.Error())
+	}
 }
 
 // normalizeCommand deja solo el comando base: "/reporte_diario" desde "/reporte_diario@G3D4_bot hola".

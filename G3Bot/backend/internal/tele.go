@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -147,6 +148,70 @@ func (c *Client) SendMessageTo(ctx context.Context, chatID string, text string) 
 		Description string `json:"description"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
+		return fmt.Errorf("telegram: invalid json (%s): %w", res.Status, err)
+	}
+	if !parsed.OK {
+		return fmt.Errorf("telegram: %s — %s", res.Status, parsed.Description)
+	}
+	return nil
+}
+
+// SendDocumentTo envía un archivo (document) al chat indicado.
+func (c *Client) SendDocumentTo(ctx context.Context, chatID, filename string, content []byte) error {
+	if strings.TrimSpace(c.token) == "" {
+		return errors.New("telegram client: missing token")
+	}
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return errors.New("telegram: empty chat_id")
+	}
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return errors.New("telegram: empty filename")
+	}
+	if len(content) == 0 {
+		return errors.New("telegram: empty document content")
+	}
+
+	endpoint := "https://api.telegram.org/bot" + c.token + "/sendDocument"
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	if err := writer.WriteField("chat_id", chatID); err != nil {
+		return err
+	}
+	part, err := writer.CreateFormFile("document", filename)
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(content); err != nil {
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	res, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	var parsed struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return fmt.Errorf("telegram: invalid json (%s): %w", res.Status, err)
 	}
 	if !parsed.OK {

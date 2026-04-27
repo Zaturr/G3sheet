@@ -46,7 +46,7 @@ func main() {
 
 	go func() {
 		defer wg.Done()
-		log.Println("comandos: /20-12, /reporte_diario, /reporte_semanal, /pendiente")
+		log.Println("comandos: /20-12, /reporte_diario, /reporte_semanal, /pdf, /pendiente")
 		if err := internal.RunUpdatesLoop(ctx, client, sheetsReader); err != nil && err != context.Canceled {
 			log.Printf("updates: %v", err)
 		}

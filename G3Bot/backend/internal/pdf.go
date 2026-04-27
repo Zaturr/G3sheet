@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,11 +26,11 @@ func BuildReportesPDF(ctx context.Context, sh *SheetsReader) ([]byte, string, er
 		return nil, "", fmt.Errorf("Sheets no configurado")
 	}
 
-	diario, err := sh.ReadReporteDiarioTexto(ctx)
+	diario, err := sh.ReadReporteDiarioRich(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("leer reporte diario: %w", err)
 	}
-	semanal, err := sh.ReadReporteSemanalTexto(ctx)
+	semanal, err := sh.ReadReporteSemanalRich(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("leer reporte semanal: %w", err)
 	}
@@ -52,7 +53,7 @@ func BuildReportesPDF(ctx context.Context, sh *SheetsReader) ([]byte, string, er
 	return out.Bytes(), name, nil
 }
 
-func addReportPage(pdf *gofpdf.Fpdf, title, body string) {
+func addReportPage(pdf *gofpdf.Fpdf, title string, body []RichLine) {
 	tr := pdf.UnicodeTranslatorFromDescriptor("")
 
 	pdf.AddPage()
@@ -63,12 +64,12 @@ func addReportPage(pdf *gofpdf.Fpdf, title, body string) {
 	pdf.Ln(2)
 
 	pdf.SetFont("Arial", "", 10)
-	txt := strings.TrimSpace(body)
-	if txt == "" {
-		txt = "(Vacío) No hay datos para este reporte."
+	if len(body) == 0 {
+		body = []RichLine{{{Text: "(Vacío) No hay datos para este reporte.", Bold: false}}}
 	}
-	// MultiCell soporta saltos de línea y reparte texto largo en varias líneas.
-	pdf.MultiCell(0, 5, tr(txt), "", "L", false)
+	htmlW := pdf.HTMLBasicNew()
+	htmlBody := richLinesToHTML(body, tr)
+	htmlW.Write(5, htmlBody)
 }
 
 func addPDFHeader(pdf *gofpdf.Fpdf, tr func(string) string) {
@@ -234,4 +235,57 @@ func detectImageType(path string) string {
 	default:
 		return ""
 	}
+}
+
+func richLinesToHTML(lines []RichLine, tr func(string) string) string {
+	var b strings.Builder
+	for i, line := range lines {
+		for _, run := range line {
+			txt := formatRunTextForHTML(run.Text, run.Bold, tr)
+			b.WriteString(txt)
+		}
+		if i != len(lines)-1 {
+			b.WriteString("<br>")
+		}
+	}
+	return b.String()
+}
+
+// formatRunTextForHTML prepara texto del Sheet para HTMLBasic de gofpdf:
+// - tabs → espacios (evita &nbsp; literal que el motor no interpreta)
+// - saltos entre actividades en una misma celda (p. ej. "... ) - Otra tarea")
+// - *texto* del sheet → negrita real
+func formatRunTextForHTML(s string, sheetBold bool, tr func(string) string) string {
+	s = strings.ReplaceAll(s, "\t", "    ")
+	s = strings.ReplaceAll(s, ") - ", ")\n- ")
+	s = strings.ReplaceAll(s, " (Completado) - ", " (Completado)\n- ")
+	s = strings.ReplaceAll(s, " (completado) - ", " (completado)\n- ")
+	s = strings.ReplaceAll(s, ": - ", ":\n- ")
+	// Viñetas pegadas con punto medio (listas en una sola celda)
+	s = strings.ReplaceAll(s, "· - ", "·\n- ")
+
+	inner := markdownAsteriskToBoldHTML(s, tr)
+	if sheetBold && inner != "" {
+		return "<b>" + inner + "</b>"
+	}
+	return inner
+}
+
+// markdownAsteriskToBoldHTML convierte *título* del sheet a <b>título</b> y escapa el resto.
+func markdownAsteriskToBoldHTML(s string, tr func(string) string) string {
+	if s == "" {
+		return ""
+	}
+	re := regexp.MustCompile(`\*([^*]+)\*`)
+	last := 0
+	var b strings.Builder
+	for _, loc := range re.FindAllStringSubmatchIndex(s, -1) {
+		b.WriteString(html.EscapeString(tr(s[last:loc[0]])))
+		b.WriteString("<b>")
+		b.WriteString(html.EscapeString(tr(s[loc[2]:loc[3]])))
+		b.WriteString("</b>")
+		last = loc[1]
+	}
+	b.WriteString(html.EscapeString(tr(s[last:])))
+	return strings.ReplaceAll(b.String(), "\n", "<br>")
 }

@@ -19,11 +19,18 @@ import (
 
 // SheetsReader lee un rango y arma notificaciones legibles para Telegram.
 type SheetsReader struct {
-	srv           *sheets.Service
-	spreadsheetID string
-	readRange     string
+	srv            *sheets.Service
+	spreadsheetID  string
+	readRange      string
 	firstRowHeader bool
 }
+
+type RichTextRun struct {
+	Text string
+	Bold bool
+}
+
+type RichLine []RichTextRun
 
 // ResolveGoogleCredentials obtiene los bytes del JSON de servicio: inline (Config) o archivo.
 func ResolveGoogleCredentials(cfg Config) ([]byte, error) {
@@ -143,7 +150,8 @@ func (r *SheetsReader) ReadRangeConcatenated(ctx context.Context, a1Range string
 	return strings.Join(lines, "\n"), nil
 }
 
-// formatReportRow: columnas no vacías hasta la última con dato, unidas con tab; mantiene \n dentro de una celda.
+// formatReportRow: columnas no vacías hasta la última con dato, unidas con separador visible.
+// Telegram no muestra tabs de forma consistente; usar " | " evita que el texto se vea "todo seguido".
 // Fila totalmente vacía → "" (línea en blanco en el mensaje).
 func formatReportRow(row []interface{}) string {
 	cells := cellsToStrings(row)
@@ -165,7 +173,7 @@ func formatReportRow(row []interface{}) string {
 	for i, c := range cells {
 		parts[i] = strings.TrimSpace(c)
 	}
-	return strings.Join(parts, "\t")
+	return strings.Join(parts, " | ")
 }
 
 // ReadReporteDiarioTexto lee A:Z (layout del reporte: títulos en A, fechas en otras columnas, etc.).
@@ -180,6 +188,16 @@ func (r *SheetsReader) ReadReporteSemanalTexto(ctx context.Context) (string, err
 	return r.ReadRangeConcatenated(ctx, rng)
 }
 
+func (r *SheetsReader) ReadReporteDiarioRich(ctx context.Context) ([]RichLine, error) {
+	rng := quotedSheetRange(SheetTabReporteDiario, "A", "Z", 1, reportTextoMaxRow)
+	return r.ReadRangeRich(ctx, rng)
+}
+
+func (r *SheetsReader) ReadReporteSemanalRich(ctx context.Context) ([]RichLine, error) {
+	rng := quotedSheetRange(SheetTabReporteSemanal, "A", "Z", 1, reportTextoMaxRow)
+	return r.ReadRangeRich(ctx, rng)
+}
+
 // ReadPendienteTexto lee A:Z de la novena hoja del spreadsheet.
 func (r *SheetsReader) ReadPendienteTexto(ctx context.Context) (string, error) {
 	tab, err := r.readSheetTitleByIndex(ctx, SheetTabPendienteIndex)
@@ -188,6 +206,147 @@ func (r *SheetsReader) ReadPendienteTexto(ctx context.Context) (string, error) {
 	}
 	rng := quotedSheetRange(tab, "A", "Z", 1, reportTextoMaxRow)
 	return r.ReadRangeConcatenated(ctx, rng)
+}
+
+func (r *SheetsReader) ReadRangeRich(ctx context.Context, a1Range string) ([]RichLine, error) {
+	doc, err := r.srv.Spreadsheets.Get(r.spreadsheetID).
+		Ranges(a1Range).
+		IncludeGridData(true).
+		Fields("sheets(data(rowData(values(formattedValue,effectiveFormat.textFormat.bold,textFormatRuns(startIndex,format.bold)))))").
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, err
+	}
+	if len(doc.Sheets) == 0 {
+		return nil, nil
+	}
+
+	var out []RichLine
+	for _, sh := range doc.Sheets {
+		for _, d := range sh.Data {
+			for _, row := range d.RowData {
+				line := formatRichRow(row.Values)
+				if line != nil {
+					out = append(out, line)
+				}
+			}
+		}
+	}
+
+	for len(out) > 0 && richLineIsEmpty(out[0]) {
+		out = out[1:]
+	}
+	for len(out) > 0 && richLineIsEmpty(out[len(out)-1]) {
+		out = out[:len(out)-1]
+	}
+	return out, nil
+}
+
+func formatRichRow(cells []*sheets.CellData) RichLine {
+	if len(cells) == 0 {
+		return nil
+	}
+	last := -1
+	for i := len(cells) - 1; i >= 0; i-- {
+		if strings.TrimSpace(cells[i].FormattedValue) != "" {
+			last = i
+			break
+		}
+	}
+	if last < 0 {
+		return RichLine{{Text: "", Bold: false}}
+	}
+	cells = cells[:last+1]
+
+	var line RichLine
+	for i, c := range cells {
+		runs := cellToRichRuns(c)
+		line = append(line, runs...)
+		if i != len(cells)-1 {
+			line = append(line, RichTextRun{Text: "\t", Bold: false})
+		}
+	}
+	return mergeAdjacentRuns(line)
+}
+
+func cellToRichRuns(c *sheets.CellData) []RichTextRun {
+	if c == nil {
+		return []RichTextRun{{Text: "", Bold: false}}
+	}
+	text := c.FormattedValue
+	if text == "" {
+		return []RichTextRun{{Text: "", Bold: false}}
+	}
+	cellBold := false
+	if c.EffectiveFormat != nil && c.EffectiveFormat.TextFormat != nil && c.EffectiveFormat.TextFormat.Bold {
+		cellBold = true
+	}
+	if len(c.TextFormatRuns) == 0 {
+		return []RichTextRun{{Text: text, Bold: cellBold}}
+	}
+
+	runes := []rune(text)
+	var out []RichTextRun
+	for i, run := range c.TextFormatRuns {
+		start := int(run.StartIndex)
+		if start < 0 {
+			start = 0
+		}
+		if start > len(runes) {
+			start = len(runes)
+		}
+		end := len(runes)
+		if i+1 < len(c.TextFormatRuns) {
+			end = int(c.TextFormatRuns[i+1].StartIndex)
+			if end < start {
+				end = start
+			}
+			if end > len(runes) {
+				end = len(runes)
+			}
+		}
+		bold := cellBold
+		if run.Format != nil {
+			bold = run.Format.Bold
+		}
+		out = append(out, RichTextRun{Text: string(runes[start:end]), Bold: bold})
+	}
+	if len(out) == 0 {
+		return []RichTextRun{{Text: text, Bold: cellBold}}
+	}
+	return mergeAdjacentRuns(out)
+}
+
+func mergeAdjacentRuns(runs []RichTextRun) []RichTextRun {
+	if len(runs) == 0 {
+		return nil
+	}
+	out := make([]RichTextRun, 0, len(runs))
+	for _, r := range runs {
+		if len(out) == 0 {
+			out = append(out, r)
+			continue
+		}
+		last := &out[len(out)-1]
+		if last.Bold == r.Bold {
+			last.Text += r.Text
+		} else {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func richLineIsEmpty(line RichLine) bool {
+	if len(line) == 0 {
+		return true
+	}
+	var b strings.Builder
+	for _, r := range line {
+		b.WriteString(r.Text)
+	}
+	return strings.TrimSpace(b.String()) == ""
 }
 
 func (r *SheetsReader) readSheetTitleByIndex(ctx context.Context, idx int) (string, error) {

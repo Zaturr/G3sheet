@@ -41,8 +41,14 @@ func BuildReportesPDF(ctx context.Context, sh *SheetsReader) ([]byte, string, er
 	pdf.SetMargins(12, 12, 12)
 	pdf.SetAutoPageBreak(true, 12)
 
-	addReportPage(pdf, "Reporte Diario", diario)
-	addReportPage(pdf, "Reporte Semanal", semanal)
+	tr := pdf.UnicodeTranslatorFromDescriptor("")
+	// Encabezado en cada página física (incluye saltos automáticos del contenido HTML).
+	pdf.SetHeaderFuncMode(func() {
+		addPDFHeader(pdf, tr)
+	}, false)
+
+	addReportPage(pdf, tr, "Reporte Diario", diario)
+	addReportPage(pdf, tr, "Reporte Semanal", semanal)
 
 	var out bytes.Buffer
 	if err := pdf.Output(&out); err != nil {
@@ -53,11 +59,8 @@ func BuildReportesPDF(ctx context.Context, sh *SheetsReader) ([]byte, string, er
 	return out.Bytes(), name, nil
 }
 
-func addReportPage(pdf *gofpdf.Fpdf, title string, body []RichLine) {
-	tr := pdf.UnicodeTranslatorFromDescriptor("")
-
+func addReportPage(pdf *gofpdf.Fpdf, tr func(string) string, title string, body []RichLine) {
 	pdf.AddPage()
-	addPDFHeader(pdf, tr)
 
 	pdf.SetFont("Arial", "B", 16)
 	pdf.CellFormat(0, 9, tr(title), "", 1, "L", false, 0, "")

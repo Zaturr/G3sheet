@@ -6,6 +6,11 @@ import (
 	"encoding/xml"
 	"fmt"
 	"html"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,7 +22,7 @@ import (
 
 const defaultPDFTitle = "Reporte"
 const defaultHeaderDesignPath = "internal/diseño.xml"
-const defaultHeaderLogoPath = `C:\Users\bdsyc\.cursor\projects\c-Users-bdsyc-OneDrive-Escritorio-telegram-botcito-G3sheet-G3Bot-backend\assets\c__Users_bdsyc_AppData_Roaming_Cursor_User_workspaceStorage_a145905ef5f376731132aed751c0aa79_images_Gemini_Generated_Image_k80in3k80in3k80i-b6573866-6b65-4dc9-bd1a-1bc27e039724.png`
+const defaultHeaderLogoPath = "../logo_gq_transparente.png"
 
 // BuildReportesPDF arma un PDF con dos páginas:
 // 1) reporte diario, 2) reporte semanal.
@@ -101,10 +106,10 @@ func addPDFHeader(pdf *gofpdf.Fpdf, tr func(string) string) {
 	// Logo personalizado a la derecha.
 	if logoPath := resolveHeaderLogoPath(); logoPath != "" {
 		if imgType := detectImageType(logoPath); imgType != "" {
-			logoW := 56.0
-			logoH := 30.0
+			// Mantener proporción para evitar deformación y conservar nitidez.
+			logoW, logoH := resolveLogoBoxSize(logoPath, 22, 18)
 			logoX := pageW - right - logoW
-			logoY := topY + 2
+			logoY := topY + 3
 			pdf.ImageOptions(
 				logoPath,
 				logoX,
@@ -213,14 +218,41 @@ func readHeaderData(path string) headerData {
 
 func resolveHeaderLogoPath() string {
 	if v := strings.TrimSpace(os.Getenv("PDF_HEADER_LOGO_PATH")); v != "" {
-		if st, err := os.Stat(v); err == nil && !st.IsDir() {
-			return v
+		if p := ResolveAssetPath(v); p != "" {
+			if st, err := os.Stat(p); err == nil && !st.IsDir() {
+				return p
+			}
 		}
 	}
-	if st, err := os.Stat(defaultHeaderLogoPath); err == nil && !st.IsDir() {
-		return defaultHeaderLogoPath
+	candidates := []string{
+		defaultHeaderLogoPath,
+		filepath.Join("backend", defaultHeaderLogoPath),
+	}
+	for _, p := range candidates {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
 	}
 	return ""
+}
+
+func resolveLogoBoxSize(path string, maxW, maxH float64) (float64, float64) {
+	f, err := os.Open(path)
+	if err != nil {
+		return maxW, maxH
+	}
+	defer f.Close()
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return maxW, maxH
+	}
+	scaleW := maxW / float64(cfg.Width)
+	scaleH := maxH / float64(cfg.Height)
+	scale := math.Min(scaleW, scaleH)
+	if scale <= 0 {
+		return maxW, maxH
+	}
+	return float64(cfg.Width) * scale, float64(cfg.Height) * scale
 }
 
 func detectImageType(path string) string {

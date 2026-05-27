@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,7 +36,7 @@ func ResolveGoogleCredentials(cfg Config) ([]byte, error) {
 	if s := strings.TrimSpace(cfg.GoogleCredentialsJSON); s != "" {
 		return []byte(s), nil
 	}
-	p := strings.TrimSpace(cfg.GoogleCredentialsPath)
+	p := ResolveAssetPath(strings.TrimSpace(cfg.GoogleCredentialsPath))
 	if p == "" {
 		return nil, fmt.Errorf("define GOOGLE_CREDENTIALS_JSON o GOOGLE_APPLICATION_CREDENTIALS")
 	}
@@ -49,41 +48,12 @@ func ResolveGoogleCredentials(cfg Config) ([]byte, error) {
 }
 
 func readCredentialFile(p string) ([]byte, error) {
-	if filepath.IsAbs(p) {
-		return os.ReadFile(p)
+	resolved := ResolveAssetPath(p)
+	b, err := os.ReadFile(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("archivo no encontrado: %s", resolved)
 	}
-	add := func(list *[]string, s string) {
-		s = filepath.Clean(s)
-		for _, x := range *list {
-			if x == s {
-				return
-			}
-		}
-		*list = append(*list, s)
-	}
-	var candidates []string
-	add(&candidates, p)
-	if wd, err := os.Getwd(); err == nil {
-		add(&candidates, filepath.Join(wd, p))
-		add(&candidates, filepath.Join(wd, "..", p))
-	}
-	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		add(&candidates, filepath.Join(dir, p))
-		add(&candidates, filepath.Join(dir, "..", p))
-	}
-	var lastErr error
-	for _, c := range candidates {
-		b, err := os.ReadFile(c)
-		if err == nil {
-			return b, nil
-		}
-		lastErr = err
-	}
-	if lastErr != nil {
-		return nil, lastErr
-	}
-	return nil, fmt.Errorf("archivo no encontrado: %s", p)
+	return b, nil
 }
 
 // NewSheetsReader usa credenciales de cuenta de servicio (JSON en bytes) y el scope de solo lectura.

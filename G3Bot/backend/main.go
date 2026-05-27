@@ -15,6 +15,7 @@ import (
 )
 
 func main() {
+	internal.InitConfigDir()
 	loadDotEnv()
 
 	cfg, err := internal.LoadConfig()
@@ -58,10 +59,12 @@ func main() {
 	log.Println("terminado")
 }
 
-// loadDotEnv carga el primer .env que exista: junto al ejecutable, en el cwd, o cwd/backend.
-// godotenv.Load() solo miraba el directorio desde el que corres el programa; por eso fallaba si no era backend/.
+// loadDotEnv carga .env: primero G3Bot/config, luego rutas legacy (backend/, cwd).
 func loadDotEnv() {
 	var paths []string
+	if d := internal.ConfigDir(); d != "" {
+		paths = append(paths, filepath.Join(d, ".env"))
+	}
 	if exe, err := os.Executable(); err == nil {
 		paths = append(paths, filepath.Join(filepath.Dir(exe), ".env"))
 	}
